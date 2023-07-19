@@ -82,7 +82,7 @@ You can use any LLM provider that is supported by LangChain, e.g., `ai21`, `alep
 
 **NOTE**: to use any of the providers you will need to install additional packages; when you first try to use a configuration with a new provider, you will typically receive an error from LangChain that will instruct you on what package should be installed.
 
-**IMPORTANT**: while from a technical perspective, you can instantiate any of the LLM providers above, depending on the capabilities of the model, some will work better than others with the NeMo Guardrails toolkit. The toolkit includes prompts that have been optimized for certain types of models (e.g. openai). For others, you can optimize the prompts yourself see [...](#) section.
+**IMPORTANT**: while from a technical perspective, you can instantiate any of the LLM providers above, depending on the capabilities of the model, some will work better than others with the NeMo Guardrails toolkit. The toolkit includes prompts that have been optimized for certain types of models (e.g. openai). For others, you can optimize the prompts yourself see [LLM Prompts](#llm-prompts) section.
 
 
 #### Custom LLM Models
@@ -186,6 +186,24 @@ The full list of tasks used by the NeMo Guardrails toolkit is the following:
 - `check_hallucination`: check if the bot response is a hallucination.
 
 You can check the default prompts in the [prompts](../../nemoguardrails/llm/prompts) folder.
+
+### Multi-step Generation
+
+With a large language model (LLM) that is fine-tuned for instruction following, particularly those exceeding 100 billion parameters, it's possible to enable the generation of complex, multi-step flows.
+
+**EXPERIMENTAL**: this feature is experimental and should only be used for testing and evaluation purposes.
+
+```yaml
+enable_multi_step_generation: True
+```
+
+### Lowest Temperature
+
+This temperature will be used for the tasks that require deterministic behavior (e.g., `dolly-v2-3b` requires a strictly positive one).
+
+```yaml
+lowest_temperature: 0.1
+```
 
 ## Guardrails Definitions
 
