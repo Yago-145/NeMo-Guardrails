@@ -82,10 +82,8 @@ class LLMRails:
         # First, we initialize the runtime.
         self.runtime = Runtime(config=config, verbose=verbose)
 
-        # Next, we initialize the LLM engine.
-        self._init_llm()
-        self.runtime.register_action_param("llm", self.llm)
-
+        # Next, we initialize the LLM engines (main engine and action engines if specified).
+        self._init_llms()
         # Next, we initialize the LLM Generate actions and register them.
         actions = LLMGenerationActions(
             config=config,
@@ -101,8 +99,16 @@ class LLMRails:
         if config_module is not None and hasattr(config_module, "init"):
             config_module.init(self)
 
-    def _init_llm(self):
-        """Initializes the right LLM engine based on the configuration."""
+    def _init_llms(self):
+        """
+        Initializes the right LLM engines based on the configuration.
+        There can be multiple LLM engines and types that can be specified in the config.
+        The main LLM engine is the one that will be used for all the core guardrails generations.
+        Other LLM engines can be specified for use in specific actions.
+
+        The reason we provide an option for decoupling the main LLM engine from the action LLM
+        is to allow for flexibility in using specialized LLM engines for specific actions.
+        """
 
         # If we already have a pre-configured one, we do nothing.
         if self.llm is not None:
@@ -110,34 +116,41 @@ class LLMRails:
 
         # TODO: Currently we assume the first model is the main one. Add proper support
         #  to search for the main model config.
-        main_llm_config = self.config.models[0]
 
-        if main_llm_config.engine not in get_llm_provider_names():
-            raise Exception(f"Unknown LLM engine: {main_llm_config.engine}")
+        for llm_config in self.config.models:
+            if llm_config.engine not in get_llm_provider_names():
+                raise Exception(f"Unknown LLM engine: {llm_config.engine}")
 
-        provider_cls = get_llm_provider(main_llm_config)
+            provider_cls = get_llm_provider(llm_config)
+            # We need to compute the kwargs for initializing the LLM
+            kwargs = llm_config.parameters
 
-        # We need to compute the kwargs for initializing the LLM
-        kwargs = main_llm_config.parameters
+            # We also need to pass the model, if specified
+            if llm_config.model:
+                # Some LLM providers use `model_name` instead of model. For backward compatibility
+                # we keep this hard-coded mapping.
+                if llm_config.engine in [
+                    "azure",
+                    "openai",
+                    "gooseai",
+                    "nlpcloud",
+                    "petals",
+                ]:
+                    kwargs["model_name"] = llm_config.model
+                else:
+                    # The `__fields__` attribute is computed dynamically by pydantic.
+                    if "model" in provider_cls.__fields__:
+                        kwargs["model"] = llm_config.model
 
-        # We also need to pass the model, if specified
-        if main_llm_config.model:
-            # Some LLM providers use `model_name` instead of model. For backward compatibility
-            # we keep this hard-coded mapping.
-            if main_llm_config.engine in [
-                "azure",
-                "openai",
-                "gooseai",
-                "nlpcloud",
-                "petals",
-            ]:
-                kwargs["model_name"] = main_llm_config.model
+            if llm_config.type == "main" or len(self.config.models) == 1:
+                self.llm = provider_cls(**kwargs)
+                self.runtime.register_action_param("llm", self.llm)
             else:
-                # The `__fields__` attribute is computed dynamically by pydantic.
-                if "model" in provider_cls.__fields__:
-                    kwargs["model"] = main_llm_config.model
-
-        self.llm = provider_cls(**kwargs)
+                model_name = f"{llm_config.type}_llm"
+                setattr(self, model_name, provider_cls(**kwargs))
+                self.runtime.register_action_param(
+                    model_name, getattr(self, model_name)
+                )
 
     def _get_events_for_messages(self, messages: List[dict]):
         """Return the list of events corresponding to the provided messages.
@@ -179,6 +192,8 @@ class LLMRails:
                 events.append({"type": "bot_said", "content": msg["content"]})
             elif msg["role"] == "context":
                 events.append({"type": "context_update", "data": msg["content"]})
+            elif msg["role"] == "event":
+                events.append(msg["event"])
 
         return events
 
@@ -194,6 +209,7 @@ class LLMRails:
                 {"role": "context", "content": {"user_name": "John"}},
                 {"role": "user", "content": "Hello! How are you?"},
                 {"role": "assistant", "content": "I am fine, thank you!"},
+                {"role": "event", "event": {"type": "user_silent"}},
                 ...
             ]
         ```
@@ -272,6 +288,58 @@ class LLMRails:
             )
 
         return asyncio.run(self.generate_async(prompt=prompt, messages=messages))
+
+    async def generate_events_async(self, events: List[dict]) -> List[dict]:
+        """Generate the next events based on the provided history.
+
+        The format for events is the following:
+
+        ```python
+            [
+                {"type": "...", ...},
+                ...
+            ]
+        ```
+
+        Args:
+            events: The history of events to be used to generate the next events.
+
+        Returns:
+            The newly generate event(s).
+
+        """
+        t0 = time.time()
+        llm_stats.reset()
+
+        # Compute the new events.
+        new_events = await self.runtime.generate_events(events)
+
+        # If logging is enabled, we log the conversation
+        # TODO: add support for logging flag
+        if self.verbose:
+            history = get_colang_history(events)
+            log.info(f"Conversation history so far: \n{history}")
+
+        log.info("--- :: Total processing took %.2f seconds." % (time.time() - t0))
+        log.info("--- :: Stats: %s" % llm_stats)
+
+        return new_events
+
+    def generate_events(self, events: List[dict]) -> List[dict]:
+        """Synchronous version of `LLMRails.generate_events_async`."""
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            raise RuntimeError(
+                "You are using the sync `generate_events` inside async code. "
+                "You should replace with `await generate_events_async(...)."
+            )
+
+        return asyncio.run(self.generate_events_async(events=events))
 
     def register_action(self, action: callable, name: Optional[str] = None):
         """Register a custom action for the rails configuration."""

@@ -18,7 +18,7 @@ from typing import Optional
 
 from langchain.llms.base import BaseLLM
 
-from nemoguardrails.actions.actions import ActionResult, action
+from nemoguardrails.actions import action
 from nemoguardrails.actions.llm.utils import llm_call
 from nemoguardrails.llm.params import llm_params
 from nemoguardrails.llm.taskmanager import LLMTaskManager
@@ -28,20 +28,21 @@ log = logging.getLogger(__name__)
 
 
 @action(is_system_action=True)
-async def check_jailbreak(
+async def output_moderation_v2(
     llm_task_manager: LLMTaskManager,
     context: Optional[dict] = None,
     llm: Optional[BaseLLM] = None,
 ):
-    """Checks if the user response is malicious and should be masked."""
+    """Checks if the bot response is appropriate and passes moderation."""
 
+    bot_response = context.get("last_bot_message")
     user_input = context.get("last_user_message")
-
-    if user_input:
+    if bot_response:
         prompt = llm_task_manager.render_task_prompt(
-            task=Task.JAILBREAK_CHECK,
+            task=Task.OUTPUT_MODERATION_V2,
             context={
                 "user_input": user_input,
+                "bot_response": bot_response,
             },
         )
 
@@ -49,14 +50,9 @@ async def check_jailbreak(
             check = await llm_call(llm, prompt)
 
         check = check.lower().strip()
-        log.info(f"Jailbreak check result is {check}.")
+        log.info(f"Output moderation check result is {check}.")
 
         if "yes" in check:
-            return ActionResult(
-                return_value=False,
-                events=[
-                    {"type": "mask_prev_user_message", "intent": "unanswerable message"}
-                ],
-            )
-    # If there was no user input, we always return True i.e. the user input is allowed
+            return False
+
     return True
