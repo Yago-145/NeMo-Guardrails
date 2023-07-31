@@ -61,21 +61,12 @@ setup(
     install_requires=[
         "pydantic~=1.10.6",
         "aiohttp==3.8.4",
-<<<<<<< HEAD
-        "langchain>=0.0.167",
-        "requests==2.28.2",
-        "typer==0.7.0",
-        "PyYAML~=6.0",
-        "setuptools~=65.5.1",
-        #"annoy==1.17.1",
-=======
         "langchain==0.0.167",
         "requests>=2.31.0",
         "typer==0.7.0",
         "PyYAML~=6.0",
         "setuptools~=65.5.1",
-        "annoy==1.17.3",
->>>>>>> upstream/main
+        #"annoy==1.17.3",
         "sentence-transformers==2.2.2",
         "fastapi==0.96.0",
         "starlette==0.27.0",
